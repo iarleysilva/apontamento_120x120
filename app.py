@@ -169,7 +169,7 @@ with tab_dash:
     with c2:
         st.metric(label="Volume Efetuado (Apontado)", value="113 Peças", delta="68.5% Aderência")
     with c3:
-        st.metric(label="⚠️ Gap de Lançamento (Pecado do Time)", value="52 Peças", delta="-52 pendentes", delta_color="inverse")
+        st.metric(label="⚠️ Gap de Lançamento (Sem apontamento)", value="52 Peças", delta="-52 pendentes", delta_color="inverse")
         
     st.markdown("---")
     
