@@ -17,17 +17,24 @@ def carregar_dados():
     
     df = pd.read_csv(url)
     
-    # Tratamentos de Tipos e Formatos
+    # Remove espaços em branco invisíveis nas pontas dos nomes das colunas
+    df.columns = df.columns.str.strip()
+    
+    # Tratamentos de Tipos e Formatos baseados exatamente nas suas labels reais e corrigidas
     if 'Percursos' in df.columns:
         df['Percursos'] = df['Percursos'].fillna(0).astype(str).str.replace(r'\.0$', '', regex=True)
     if 'QTS previsto' in df.columns:
         df['QTS previsto'] = pd.to_numeric(df['QTS previsto'], errors='coerce').fillna(0).astype(int)
-    if 'QTS regsitrado' in df.columns:
-        df['QTS regsitrado'] = pd.to_numeric(df['QTS regsitrado'], errors='coerce').fillna(0).astype(int)
+    if 'QTS registrado' in df.columns:
+        df['QTS registrado'] = pd.to_numeric(df['QTS registrado'], errors='coerce').fillna(0).astype(int)
     if 'total tratado' in df.columns:
         df['total tratado'] = pd.to_numeric(df['total tratado'], errors='coerce').fillna(0)
+    if 'total expedido' in df.columns:
+        df['total expedido'] = pd.to_numeric(df['total expedido'], errors='coerce').fillna(0)
     if 'mês' in df.columns:
         df['mês'] = pd.to_numeric(df['mês'], errors='coerce')
+    if 'data' in df.columns:
+        df['data'] = df['data'].fillna('-')
         
     return df
 
@@ -63,9 +70,9 @@ else:
 
 # --- LÓGICA DO FILTRO PADRÃO DA OPERAÇÃO ---
 def classificar_percurso(row):
-    pais = str(row['País']).upper()
-    status = str(row['Status']).strip().upper()
-    registrado = row['QTS regsitrado']
+    pais = str(row['País']).upper() if 'País' in row else ''
+    status = str(row['Status']).strip().upper() if 'Status' in row else ''
+    registrado = row['QTS registrado'] if 'QTS registrado' in row else 0
     
     if pais == 'PARAGUAI':
         return 'Paraguai (Azul)'
@@ -82,7 +89,7 @@ def classificar_percurso(row):
 if not df_tabela_filtrado.empty:
     df_tabela_filtrado['Filtro_Operacional'] = df_tabela_filtrado.apply(classificar_percurso, axis=1)
 
-    # Ordenação do Status (Pendentes no topo, Concluídos no fundo)
+    # Ordenação do Status (Pendentes no topo) + Ordenação cronológica por Data/Fatura
     def definir_peso_status(status_str):
         status_upper = str(status_str).upper()
         if 'CONCLUIDO' in status_upper:
@@ -93,12 +100,11 @@ if not df_tabela_filtrado.empty:
             return 1
 
     df_tabela_filtrado['Ordem_Status'] = df_tabela_filtrado['Status'].apply(definir_peso_status)
-    df_tabela_filtrado = df_tabela_filtrado.sort_values(by=['Ordem_Status', 'fatura'], ascending=[True, True])
+    df_tabela_filtrado = df_tabela_filtrado.sort_values(by=['Ordem_Status', 'data', 'fatura'], ascending=[True, True, True])
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Visualização de Dados (Filtro Padrão)**")
 
-# CORREÇÃO AQUI: As chaves batem 100% agora entre as opções e os valores padrão
 opcoes_visao = [
     'Crítico: Concluído sem Registro (Vermelho)', 
     'Intermediário: Pronto sem Registro (Vermelho)',
@@ -130,12 +136,15 @@ with tab_acompanhamento:
     st.title("📋 Foco Operacional: Percursos Pendentes")
     st.markdown("🛠️ **Ordem de Prioridade Operacional:** Pendentes no Topo 🔼, Prontos no Meio 🟦 e Concluídos na Base 🔽.")
     
-    colunas_exibicao = ['Percursos', 'QTS previsto', 'QTS regsitrado', 'Status', 'fatura', 'País', 'Filtro_Operacional']
+    colunas_exibicao = ['data', 'Percursos', 'QTS previsto', 'QTS registrado', 'Status', 'fatura', 'País', 'Filtro_Operacional']
     colunas_existentes = [c for c in colunas_exibicao if c in df_tabela_final.columns]
     
     if not df_tabela_final.empty:
         df_tabela_exibir = df_tabela_final[colunas_existentes].drop(columns=['Filtro_Operacional'], errors='ignore').reset_index(drop=True)
         
+        # Ajusta cabeçalhos estéticos
+        df_tabela_exibir = df_tabela_exibir.rename(columns={'data': 'Data', 'fatura': 'Fatura'})
+
         def colorir_apenas_status(df_data):
             df_styler = pd.DataFrame('', index=df_data.index, columns=df_data.columns)
             for idx, row in df_tabela_final.reset_index(drop=True).iterrows():
@@ -150,7 +159,7 @@ with tab_acompanhamento:
                     df_styler.at[idx, 'Status'] = 'background-color: #e6f2ff; color: #004085; font-weight: bold;'
             return df_styler
 
-        formatos = {'QTS previsto': '{:.0f}', 'QTS regsitrado': '{:.0f}'}
+        formatos = {'QTS previsto': '{:.0f}', 'QTS registrado': '{:.0f}'}
         df_styled = df_tabela_exibir.style.apply(colorir_apenas_status, axis=None).format(formatos)
         st.dataframe(df_styled, use_container_width=True, height=550, hide_index=True)
     else:
@@ -161,7 +170,24 @@ with tab_dash:
     st.title("📊 Indicadores Gerenciais & Raio-X de Transição Logística")
     st.markdown("Auditoria de processos logísticos com comparativo real entre o Modelo Antigo e a implantação do Modelo Novo.")
     
-    # 🎯 BLOCO 1: AUDITORIA DE APONTAMENTOS (Valores consolidados pelo usuário)
+    df_padrao_dash = df_dash_filtrado[df_dash_filtrado['País'].str.upper().fillna('') != 'PARAGUAI']
+    
+    dados_expedidos = {"Junho": 577, "Julho": 178, "Todos": 577 + 178}
+    total_expedido_periodo = dados_expedidos.get(mes_selecionado, 0)
+    
+    # Mapeamento com a coluna corrigida
+    total_previsto = df_padrao_dash[df_dash_filtrado['mês'] != 5.0]['QTS previsto'].sum()
+    total_apontado = df_padrao_dash[df_dash_filtrado['mês'] != 5.0]['QTS registrado'].sum()
+    total_tratado_estrados = df_dash_filtrado['total tratado'].sum()
+    
+    gap_apontamento = total_previsto - total_apontado
+    eficiencia_apontamento = (total_apontado / total_previsto * 100) if total_previsto > 0 else 100.0
+    
+    estufas_necessarias_sem_otimizacao = total_expedido_periodo / 12 if total_expedido_periodo > 0 else 0.0
+    estufas_consumidas_passivo = (total_expedido_periodo - 165) / 12 if total_expedido_periodo > 0 else 0.0
+    estufas_totais_tratadas_efetivas = total_tratado_estrados / 164
+
+    # 🎯 BLOCO 1
     st.subheader("🎯 Auditoria de Apontamentos (Esperado vs Real)")
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -169,11 +195,11 @@ with tab_dash:
     with c2:
         st.metric(label="Volume Efetuado (Apontado)", value="113 Peças", delta="68.5% Aderência")
     with c3:
-        st.metric(label="⚠️ Gap de Lançamento (Sem apontamento)", value="52 Peças", delta="-52 pendentes", delta_color="inverse")
+        st.metric(label="⚠️ Gap de Lançamento (Pecado do Time)", value="52 Peças", delta="-52 pendentes", delta_color="inverse")
         
     st.markdown("---")
     
-    # 🚀 BLOCO 2: ANÁLISE DE IMPACTO LOGÍSTICO E CAPACIDADE (Total Expedido Geral)
+    # 🚀 BLOCO 2
     st.subheader("🚀 Análise de Impacto Logístico e Capacidade")
     c4, c5, c6 = st.columns(3)
     with c4:
@@ -188,17 +214,12 @@ with tab_dash:
 
     st.markdown("---")
     
-    # 🔍 BLOCO 3: RAIO-X REAL DA COMPOSIÇÃO DE FORÇAS
+    # 🔍 BLOCO 3
     st.subheader("🔍 Demonstração de Transição: Modelo Antigo vs Modelo Novo Atual")
-    st.markdown("Este bloco expõe por que o modelo novo provisório soma **87 estufas totais**. O estoque passivo anterior ainda pesa muito, mas o ganho futuro já está mapeado.")
-    
     c7, c8, c9 = st.columns(3)
     with c7:
         st.metric(label="📦 Volume Passivo Anterior (755 - 165)", value="590 Plts", delta="49.0 Estufas (Base 12)", delta_color="inverse")
-        st.caption("Custo inevitável em estufas absorvido pelo estoque produzido no modelo antigo.")
     with c8:
         st.metric(label="🔥 Custo Otimizado Novo (Ações Atuais)", value="37.8 Estufas", delta="Base 164 Aplicada")
-        st.caption("Volume gerado pelo processamento otimizado dos 6.197 novos estrados.")
     with c9:
         st.metric(label="📊 Modelo Novo Total Provisório (Passivo + Otimizado)", value="87.0 Estufas", delta="Estoque antigo ainda pesa")
-        st.caption("O impacto conjunto atual. À medida que o passivo de 49 estufas zerar, o ganho de eficiência ficará isolado e evidente.")
