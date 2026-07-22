@@ -25,7 +25,7 @@ def carregar_dados_combinados():
     df_b.columns = df_b.columns.str.strip()
     df_p.columns = df_p.columns.str.strip()
     
-    # Padronização de nomes de coluna para 'mês' se existir com variação de maiúscula/acento
+    # Padronização de nomes de coluna para 'mês' se existir com variação
     for col in df_p.columns:
         if col.lower() in ['mês', 'mes']:
             df_p.rename(columns={col: 'mês'}, inplace=True)
@@ -45,6 +45,12 @@ def carregar_dados_combinados():
         df_p['mês'] = pd.to_numeric(df_p['mês'], errors='coerce')
     if 'data' in df_p.columns:
         df_p['data'] = df_p['data'].fillna('-')
+        
+    # Tratamento das Novas Colunas
+    if 'cod_produto_ora' in df_p.columns:
+        df_p['cod_produto_ora'] = df_p['cod_produto_ora'].fillna('-').astype(str).str.replace(r'\.0$', '', regex=True)
+    if 'formato_nominal' in df_p.columns:
+        df_p['formato_nominal'] = df_p['formato_nominal'].fillna('-').astype(str)
 
     # Tratamentos - Banco Validação
     if 'Total Expedido (Plts)' in df_b.columns:
@@ -76,7 +82,7 @@ meses_operacionais = sorted([m for m in df_banco['Mês'].dropna().unique() if m 
 opcoes_filtro_mes = ["Todos"] + [meses_nomes[m] for m in meses_operacionais]
 mes_selecionado = st.sidebar.selectbox("Selecione o Mês", opcoes_filtro_mes)
 
-# Segmentação de Dados por Mês (com verificação de existência da coluna)
+# Segmentação de Dados por Mês
 if mes_selecionado == "Todos":
     df_banco_filtrado = df_banco[df_banco['Mês'] != 5.0].copy()
     if 'mês' in df_percursos.columns:
@@ -142,8 +148,7 @@ opcoes_visao = [
 visao_selecionada = st.sidebar.multiselect(
     "Exibir na tabela:", 
     options=opcoes_visao, 
-    default=[
-        'Crítico: Concluído sem Registro (Vermelho)', 
+    default=[ 
         'Intermediário: Pronto sem Registro (Vermelho)',
         'Pendente: Aguardando Lançamento (Amarelo)'
     ]
@@ -157,17 +162,37 @@ else:
 # 3. DEFINIÇÃO DAS ABAS
 tab_acompanhamento, tab_dash = st.tabs(["📋 Acompanhamento Detalhado", "📊 Dashboard de Resultados"])
 
-# --- ABA 1: ACOMPANHAMENTO DETALHADO ---
+# --- ABA 1: ACOMPANHAMENTO DETALHADO (INCLUINDO AS NOVAS COLUNAS) ---
 with tab_acompanhamento:
     st.title("📋 Foco Operacional: Percursos Pendentes")
     st.markdown("🛠️ **Ordem de Prioridade Operacional:** Pendentes no Topo 🔼, Prontos no Meio 🟦 e Concluídos na Base 🔽.")
     
-    colunas_exibicao = ['data', 'Percursos', 'QTS previsto', 'QTS registrado', 'Status', 'fatura', 'País', 'Filtro_Operacional']
+    # Ordem das colunas com os novos campos incluídos
+    colunas_exibicao = [
+        'data', 
+        'Percursos', 
+        'cod_produto_ora', 
+        'formato_nominal', 
+        'QTS previsto', 
+        'QTS registrado', 
+        'Status', 
+        'fatura', 
+        'País', 
+        'Filtro_Operacional'
+    ]
     colunas_existentes = [c for c in colunas_exibicao if c in df_tabela_final.columns]
     
     if not df_tabela_final.empty:
         df_tabela_exibir = df_tabela_final[colunas_existentes].drop(columns=['Filtro_Operacional'], errors='ignore').reset_index(drop=True)
-        df_tabela_exibir = df_tabela_exibir.rename(columns={'data': 'Data', 'fatura': 'Fatura'})
+        
+        # Renomeando cabeçalhos para exibição
+        renomear_cabecalhos = {
+            'data': 'Data', 
+            'fatura': 'Fatura',
+            'cod_produto_ora': 'Código Oracle',
+            'formato_nominal': 'Formato Nominal'
+        }
+        df_tabela_exibir = df_tabela_exibir.rename(columns=renomear_cabecalhos)
 
         def colorir_apenas_status(df_data):
             df_styler = pd.DataFrame('', index=df_data.index, columns=df_data.columns)
