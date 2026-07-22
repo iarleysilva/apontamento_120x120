@@ -8,67 +8,90 @@ st.set_page_config(
     layout="wide"
 )
 
-# 1. Carregamento dos dados via link de exportação do Sheets
+SHEET_ID = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
+
+# 1. CARREGAMENTO DOS DADOS (DUAS ABAS COMBINADAS)
 @st.cache_data(ttl=30)
-def carregar_dados():
-    sheet_id = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
-    gid = "117910462"
-    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+def carregar_dados_combinados():
+    gid_banco = "1463836430"      # Aba Banco_validação (Consolidado)
+    gid_percursos = "117910462"   # Aba de Lançamentos de Percursos
     
-    df = pd.read_csv(url)
+    url_banco = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={gid_banco}"
+    url_percursos = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={gid_percursos}"
     
-    # Remove espaços em branco invisíveis nas pontas dos nomes das colunas
-    df.columns = df.columns.str.strip()
+    df_b = pd.read_csv(url_banco)
+    df_p = pd.read_csv(url_percursos)
     
-    # Tratamentos de Tipos e Formatos baseados exatamente nas suas labels reais e corrigidas
-    if 'Percursos' in df.columns:
-        df['Percursos'] = df['Percursos'].fillna(0).astype(str).str.replace(r'\.0$', '', regex=True)
-    if 'QTS previsto' in df.columns:
-        df['QTS previsto'] = pd.to_numeric(df['QTS previsto'], errors='coerce').fillna(0).astype(int)
-    if 'QTS registrado' in df.columns:
-        df['QTS registrado'] = pd.to_numeric(df['QTS registrado'], errors='coerce').fillna(0).astype(int)
-    if 'total tratado' in df.columns:
-        df['total tratado'] = pd.to_numeric(df['total tratado'], errors='coerce').fillna(0)
-    if 'total expedido' in df.columns:
-        df['total expedido'] = pd.to_numeric(df['total expedido'], errors='coerce').fillna(0)
-    if 'mês' in df.columns:
-        df['mês'] = pd.to_numeric(df['mês'], errors='coerce')
-    if 'data' in df.columns:
-        df['data'] = df['data'].fillna('-')
-        
-    return df
+    df_b.columns = df_b.columns.str.strip()
+    df_p.columns = df_p.columns.str.strip()
+    
+    # Padronização de nomes de coluna para 'mês' se existir com variação de maiúscula/acento
+    for col in df_p.columns:
+        if col.lower() in ['mês', 'mes']:
+            df_p.rename(columns={col: 'mês'}, inplace=True)
+            
+    for col in df_b.columns:
+        if col.lower() in ['mês', 'mes']:
+            df_b.rename(columns={col: 'Mês'}, inplace=True)
+    
+    # Tratamentos - Percursos
+    if 'Percursos' in df_p.columns:
+        df_p['Percursos'] = df_p['Percursos'].fillna(0).astype(str).str.replace(r'\.0$', '', regex=True)
+    if 'QTS previsto' in df_p.columns:
+        df_p['QTS previsto'] = pd.to_numeric(df_p['QTS previsto'], errors='coerce').fillna(0).astype(int)
+    if 'QTS registrado' in df_p.columns:
+        df_p['QTS registrado'] = pd.to_numeric(df_p['QTS registrado'], errors='coerce').fillna(0).astype(int)
+    if 'mês' in df_p.columns:
+        df_p['mês'] = pd.to_numeric(df_p['mês'], errors='coerce')
+    if 'data' in df_p.columns:
+        df_p['data'] = df_p['data'].fillna('-')
+
+    # Tratamentos - Banco Validação
+    if 'Total Expedido (Plts)' in df_b.columns:
+        df_b['Total Expedido (Plts)'] = pd.to_numeric(df_b['Total Expedido (Plts)'], errors='coerce').fillna(0)
+    if 'Total Tratado (Estrados)' in df_b.columns:
+        df_b['Total Tratado (Estrados)'] = pd.to_numeric(df_b['Total Tratado (Estrados)'], errors='coerce').fillna(0)
+    if 'Meta Prevista' in df_b.columns:
+        df_b['Meta Prevista'] = pd.to_numeric(df_b['Meta Prevista'], errors='coerce').fillna(0)
+    if 'Mês' in df_b.columns:
+        df_b['Mês'] = pd.to_numeric(df_b['Mês'], errors='coerce')
+
+    return df_b, df_p
 
 try:
-    df_raw = carregar_dados()
-    df_clean = df_raw[df_raw['Percursos'] != '0'].dropna(subset=['Percursos']).copy()
+    df_banco, df_raw_percursos = carregar_dados_combinados()
+    df_percursos = df_raw_percursos[df_raw_percursos['Percursos'] != '0'].dropna(subset=['Percursos']).copy()
 except Exception as e:
-    st.error(f"Erro ao conectar com a planilha: {e}")
+    st.error(f"Erro ao conectar com as abas do Google Sheets: {e}")
     st.stop()
 
-# 2. Filtros na Barra Lateral
+# 2. FILTROS NA BARRA LATERAL
 st.sidebar.header("⚙️ Configurações e Filtros")
 
-# Filtro de Mês
 meses_nomes = {1.0: "Janeiro", 2.0: "Fevereiro", 3.0: "Março", 4.0: "Abril", 
                5.0: "Maio", 6.0: "Junho", 7.0: "Julho", 8.0: "Agosto", 
                9.0: "Setembro", 10.0: "Outubro", 11.0: "Novembro", 12.0: "Dezembro"}
 
-meses_operacionais = sorted([m for m in df_clean['mês'].dropna().unique() if m in meses_nomes.keys() and m != 5.0])
+meses_operacionais = sorted([m for m in df_banco['Mês'].dropna().unique() if m in meses_nomes.keys() and m != 5.0])
 opcoes_filtro_mes = ["Todos"] + [meses_nomes[m] for m in meses_operacionais]
 mes_selecionado = st.sidebar.selectbox("Selecione o Mês", opcoes_filtro_mes)
 
-# Segmentação de dados para Tabela e Dash
-df_operacional_base = df_clean[df_clean['mês'] != 5.0].copy()
-
+# Segmentação de Dados por Mês (com verificação de existência da coluna)
 if mes_selecionado == "Todos":
-    df_tabela_filtrado = df_operacional_base.copy()
-    df_dash_filtrado = df_clean.copy()
+    df_banco_filtrado = df_banco[df_banco['Mês'] != 5.0].copy()
+    if 'mês' in df_percursos.columns:
+        df_percursos_filtrado = df_percursos[df_percursos['mês'] != 5.0].copy()
+    else:
+        df_percursos_filtrado = df_percursos.copy()
 else:
     num_mes = [k for k, v in meses_nomes.items() if v == mes_selecionado][0]
-    df_tabela_filtrado = df_operacional_base[df_operacional_base['mês'] == num_mes]
-    df_dash_filtrado = df_clean[df_clean['mês'] == num_mes]
+    df_banco_filtrado = df_banco[df_banco['Mês'] == num_mes]
+    if 'mês' in df_percursos.columns:
+        df_percursos_filtrado = df_percursos[df_percursos['mês'] == num_mes]
+    else:
+        df_percursos_filtrado = df_percursos.copy()
 
-# --- LÓGICA DO FILTRO PADRÃO DA OPERAÇÃO ---
+# --- LÓGICA DE NEGÓCIO E CLASSIFICAÇÃO DOS PERCURSOS ---
 def classificar_percurso(row):
     pais = str(row['País']).upper() if 'País' in row else ''
     status = str(row['Status']).strip().upper() if 'Status' in row else ''
@@ -86,10 +109,9 @@ def classificar_percurso(row):
         return 'Pendente: Aguardando Lançamento (Amarelo)'
     return 'Outros'
 
-if not df_tabela_filtrado.empty:
-    df_tabela_filtrado['Filtro_Operacional'] = df_tabela_filtrado.apply(classificar_percurso, axis=1)
+if not df_percursos_filtrado.empty:
+    df_percursos_filtrado['Filtro_Operacional'] = df_percursos_filtrado.apply(classificar_percurso, axis=1)
 
-    # Ordenação do Status (Pendentes no topo) + Ordenação cronológica por Data/Fatura
     def definir_peso_status(status_str):
         status_upper = str(status_str).upper()
         if 'CONCLUIDO' in status_upper:
@@ -99,9 +121,13 @@ if not df_tabela_filtrado.empty:
         else:
             return 1
 
-    df_tabela_filtrado['Ordem_Status'] = df_tabela_filtrado['Status'].apply(definir_peso_status)
-    df_tabela_filtrado = df_tabela_filtrado.sort_values(by=['Ordem_Status', 'data', 'fatura'], ascending=[True, True, True])
+    df_percursos_filtrado['Ordem_Status'] = df_percursos_filtrado['Status'].apply(definir_peso_status)
+    df_percursos_filtrado = df_percursos_filtrado.sort_values(
+        by=['Ordem_Status', 'data', 'fatura'], 
+        ascending=[True, True, True]
+    )
 
+# Filtro Multiselect de Visualização na Sidebar
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Visualização de Dados (Filtro Padrão)**")
 
@@ -123,15 +149,15 @@ visao_selecionada = st.sidebar.multiselect(
     ]
 )
 
-if not df_tabela_filtrado.empty:
-    df_tabela_final = df_tabela_filtrado[df_tabela_filtrado['Filtro_Operacional'].isin(visao_selecionada)]
+if not df_percursos_filtrado.empty:
+    df_tabela_final = df_percursos_filtrado[df_percursos_filtrado['Filtro_Operacional'].isin(visao_selecionada)]
 else:
     df_tabela_final = pd.DataFrame()
 
-# 3. Definição das Abas
+# 3. DEFINIÇÃO DAS ABAS
 tab_acompanhamento, tab_dash = st.tabs(["📋 Acompanhamento Detalhado", "📊 Dashboard de Resultados"])
 
-# --- ABA 1: ACOMPANHAMENTO DETALHADO (OPERACIONAL) ---
+# --- ABA 1: ACOMPANHAMENTO DETALHADO ---
 with tab_acompanhamento:
     st.title("📋 Foco Operacional: Percursos Pendentes")
     st.markdown("🛠️ **Ordem de Prioridade Operacional:** Pendentes no Topo 🔼, Prontos no Meio 🟦 e Concluídos na Base 🔽.")
@@ -141,8 +167,6 @@ with tab_acompanhamento:
     
     if not df_tabela_final.empty:
         df_tabela_exibir = df_tabela_final[colunas_existentes].drop(columns=['Filtro_Operacional'], errors='ignore').reset_index(drop=True)
-        
-        # Ajusta cabeçalhos estéticos
         df_tabela_exibir = df_tabela_exibir.rename(columns={'data': 'Data', 'fatura': 'Fatura'})
 
         def colorir_apenas_status(df_data):
@@ -170,32 +194,42 @@ with tab_dash:
     st.title("📊 Indicadores Gerenciais & Raio-X de Transição Logística")
     st.markdown("Auditoria de processos logísticos com comparativo real entre o Modelo Antigo e a implantação do Modelo Novo.")
     
-    df_padrao_dash = df_dash_filtrado[df_dash_filtrado['País'].str.upper().fillna('') != 'PARAGUAI']
+    total_expedido_periodo = float(df_banco_filtrado['Total Expedido (Plts)'].sum()) if 'Total Expedido (Plts)' in df_banco_filtrado.columns else 0.0
+    total_tratado_estrados = float(df_banco_filtrado['Total Tratado (Estrados)'].sum()) if 'Total Tratado (Estrados)' in df_banco_filtrado.columns else 0.0
     
-    dados_expedidos = {"Junho": 577, "Julho": 178, "Todos": 577 + 178}
-    total_expedido_periodo = dados_expedidos.get(mes_selecionado, 0)
+    df_p_valido = df_percursos_filtrado[
+        df_percursos_filtrado['País'].astype(str).str.upper().str.strip() != 'PARAGUAI'
+    ].copy() if not df_percursos_filtrado.empty else pd.DataFrame()
     
-    # Mapeamento com a coluna corrigida
-    total_previsto = df_padrao_dash[df_dash_filtrado['mês'] != 5.0]['QTS previsto'].sum()
-    total_apontado = df_padrao_dash[df_dash_filtrado['mês'] != 5.0]['QTS registrado'].sum()
-    total_tratado_estrados = df_dash_filtrado['total tratado'].sum()
+    total_previsto = int(df_p_valido['QTS previsto'].sum()) if 'QTS previsto' in df_p_valido.columns else 0
+    total_apontado = int(df_p_valido['QTS registrado'].sum()) if 'QTS registrado' in df_p_valido.columns else 0
     
     gap_apontamento = total_previsto - total_apontado
     eficiencia_apontamento = (total_apontado / total_previsto * 100) if total_previsto > 0 else 100.0
     
-    estufas_necessarias_sem_otimizacao = total_expedido_periodo / 12 if total_expedido_periodo > 0 else 0.0
-    estufas_consumidas_passivo = (total_expedido_periodo - 165) / 12 if total_expedido_periodo > 0 else 0.0
-    estufas_totais_tratadas_efetivas = total_tratado_estrados / 164
+    estufas_necessarias_sem_otimizacao = total_expedido_periodo / 12.0 if total_expedido_periodo > 0 else 0.0
+    volume_passivo_anterior = max(0.0, total_expedido_periodo - total_previsto)
+    estufas_consumidas_passivo = volume_passivo_anterior / 12.0 if total_expedido_periodo > 0 else 0.0
+    estufas_totais_tratadas_efetivas = total_tratado_estrados / 164.0 if total_tratado_estrados > 0 else 0.0
 
     # 🎯 BLOCO 1
     st.subheader("🎯 Auditoria de Apontamentos (Esperado vs Real)")
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.metric(label="Volume Esperado (Previsto)", value="165 Peças")
+        st.metric(label="Volume Esperado (Previsto)", value=f"{total_previsto:,} Peças".replace(',', '.'))
     with c2:
-        st.metric(label="Volume Efetuado (Apontado)", value="113 Peças", delta="68.5% Aderência")
+        st.metric(
+            label="Volume Efetuado (Apontado)", 
+            value=f"{total_apontado:,} Peças".replace(',', '.'), 
+            delta=f"{eficiencia_apontamento:.1f}% Aderência"
+        )
     with c3:
-        st.metric(label="⚠️ Gap de Lançamento (Pecado do Time)", value="52 Peças", delta="-52 pendentes", delta_color="inverse")
+        st.metric(
+            label="⚠️ Gap de Lançamento (Pecado do Time)", 
+            value=f"{gap_apontamento:,} Peças".replace(',', '.'), 
+            delta=f"-{gap_apontamento} pendentes", 
+            delta_color="inverse" if gap_apontamento > 0 else "normal"
+        )
         
     st.markdown("---")
     
@@ -203,14 +237,19 @@ with tab_dash:
     st.subheader("🚀 Análise de Impacto Logístico e Capacidade")
     c4, c5, c6 = st.columns(3)
     with c4:
-        st.metric(label="📦 Total Expedido no Período", value="755 Plts")
-        st.caption("Saldo total movimentado (desconsiderando o Paraguai).")
+        st.metric(label="📦 Total Expedido no Período", value=f"{total_expedido_periodo:,.0f} Plts".replace(',', '.'))
+        st.caption("Saldo total expedido movimentado na planilha.")
     with c5:
-        st.metric(label="⚠️ Modelo Antigo Teórico (Base 12)", value="62.9 Estufas")
-        st.caption("Estufas totais exigidas se 100% do volume fosse expedido sem a inteligência dos estrados.")
+        st.metric(label="⚠️ Modelo Antigo Teórico (Base 12)", value=f"{estufas_necessarias_sem_otimizacao:.1f} Estufas")
+        st.caption("Estufas exigidas se 100% do volume fosse expedido sem inteligência de estrados.")
     with c6:
-        st.metric(label="🪵 Total de Estrados Tratados", value="6.197 Estrados", delta="37.8 Estufas Equiv. (Base 164)", delta_color="normal")
-        st.caption("Capacidade física que passou pelo processo térmico de otimização de cubagem.")
+        st.metric(
+            label="🪵 Total de Estrados Tratados", 
+            value=f"{total_tratado_estrados:,.0f} Estrados".replace(',', '.'), 
+            delta=f"{estufas_totais_tratadas_efetivas:.1f} Estufas Equiv. (Base 164)", 
+            delta_color="normal"
+        )
+        st.caption("Capacidade física que passou pelo processo térmico.")
 
     st.markdown("---")
     
@@ -218,8 +257,22 @@ with tab_dash:
     st.subheader("🔍 Demonstração de Transição: Modelo Antigo vs Modelo Novo Atual")
     c7, c8, c9 = st.columns(3)
     with c7:
-        st.metric(label="📦 Volume Passivo Anterior (755 - 165)", value="590 Plts", delta="49.0 Estufas (Base 12)", delta_color="inverse")
+        st.metric(
+            label=f"📦 Volume Passivo Anterior ({total_expedido_periodo:.0f} - {total_previsto})", 
+            value=f"{volume_passivo_anterior:,.0f} Plts".replace(',', '.'), 
+            delta=f"{estufas_consumidas_passivo:.1f} Estufas (Base 12)", 
+            delta_color="inverse"
+        )
     with c8:
-        st.metric(label="🔥 Custo Otimizado Novo (Ações Atuais)", value="37.8 Estufas", delta="Base 164 Aplicada")
+        st.metric(
+            label="🔥 Custo Otimizado Novo (Ações Atuais)", 
+            value=f"{estufas_totais_tratadas_efetivas:.1f} Estufas", 
+            delta="Base 164 Aplicada"
+        )
     with c9:
-        st.metric(label="📊 Modelo Novo Total Provisório (Passivo + Otimizado)", value="87.0 Estufas", delta="Estoque antigo ainda pesa")
+        total_provisorio = estufas_consumidas_passivo + estufas_totais_tratadas_efetivas
+        st.metric(
+            label="📊 Modelo Novo Total Provisório (Passivo + Otimizado)", 
+            value=f"{total_provisorio:.1f} Estufas", 
+            delta="Estoque antigo ainda pesa"
+        )
